@@ -79,12 +79,15 @@ namespace winrt::TerminalApp::implementation
             // if there isn't a key associated with it.
             // However, if a nested command tries to bind a KeyChord, the
             // Command records it, but it is never actually bound to the keys.
-            const auto keyChord{ settings.KeyMap().GetKeyBindingForActionWithArgs(command.Action()) };
-            command.Keys(keyChord);
-
             if (command.HasNestedCommands())
             {
+                command.Keys(nullptr);
                 _recursiveUpdateCommandKeybindingLabels(settings, command.NestedCommands());
+            }
+            else
+            {
+                const auto keyChord{ settings.ActionMap().GetKeyBindingForAction(command.Action().Action(), command.Action().Args()) };
+                command.Keys(keyChord);
             }
         }
     }
@@ -103,7 +106,7 @@ namespace winrt::TerminalApp::implementation
             // happen before the Settings UI is reloaded and tries to re-read
             // those values.
             _UpdateCommandsForPalette();
-            CommandPalette().SetKeyMap(_settings.KeyMap());
+            CommandPalette().SetActionMap(_settings.ActionMap());
 
             if (needRefreshUI)
             {
@@ -119,7 +122,7 @@ namespace winrt::TerminalApp::implementation
     void TerminalPage::Create()
     {
         // Hookup the key bindings
-        _HookupKeyBindings(_settings.KeyMap());
+        _HookupKeyBindings(_settings.ActionMap());
 
         _tabContent = this->TabContent();
         _tabRow = this->TabRow();
@@ -546,7 +549,7 @@ namespace winrt::TerminalApp::implementation
     void TerminalPage::_CreateNewTabFlyout()
     {
         auto newTabFlyout = WUX::Controls::MenuFlyout{};
-        auto keyBindings = _settings.KeyMap();
+        auto actionMap = _settings.ActionMap();
 
         const auto defaultProfileGuid = _settings.GlobalSettings().DefaultProfile();
         // the number of profiles should not change in the loop for this to work
@@ -561,8 +564,7 @@ namespace winrt::TerminalApp::implementation
             // NewTab(ProfileIndex=N) action
             NewTerminalArgs newTerminalArgs{ profileIndex };
             NewTabArgs newTabArgs{ newTerminalArgs };
-            ActionAndArgs actionAndArgs{ ShortcutAction::NewTab, newTabArgs };
-            auto profileKeyChord{ keyBindings.GetKeyBindingForActionWithArgs(actionAndArgs) };
+            auto profileKeyChord{ actionMap.GetKeyBindingForAction(ShortcutAction::NewTab, newTabArgs) };
 
             // make sure we find one to display
             if (profileKeyChord)
@@ -686,9 +688,7 @@ namespace winrt::TerminalApp::implementation
                 settingsItem.Click({ this, &TerminalPage::_SettingsButtonOnClick });
                 newTabFlyout.Items().Append(settingsItem);
 
-                Microsoft::Terminal::Settings::Model::OpenSettingsArgs args{ SettingsTarget::SettingsUI };
-                Microsoft::Terminal::Settings::Model::ActionAndArgs settingsAction{ ShortcutAction::OpenSettings, args };
-                const auto settingsKeyChord{ keyBindings.GetKeyBindingForActionWithArgs(settingsAction) };
+                const auto settingsKeyChord{ actionMap.GetKeyBindingForAction(ShortcutAction::OpenSettings, OpenSettingsArgs{ SettingsTarget::SettingsUI }) };
                 if (settingsKeyChord)
                 {
                     _SetAcceleratorForMenuItem(settingsItem, settingsKeyChord);
@@ -837,7 +837,7 @@ namespace winrt::TerminalApp::implementation
         _mruTabs.Append(*newTabImpl);
 
         newTabImpl->SetDispatch(*_actionDispatch);
-        newTabImpl->SetKeyMap(_settings.KeyMap());
+        newTabImpl->SetActionMap(_settings.ActionMap());
 
         // Give the tab its index in the _tabs vector so it can manage its own SwitchToTab command.
         _UpdateTabIndices();
@@ -1093,14 +1093,13 @@ namespace winrt::TerminalApp::implementation
         auto const shiftDown = WI_IsFlagSet(CoreWindow::GetForCurrentThread().GetKeyState(winrt::Windows::System::VirtualKey::Shift), CoreVirtualKeyStates::Down);
 
         winrt::Microsoft::Terminal::Control::KeyChord kc{ ctrlDown, altDown, shiftDown, static_cast<int32_t>(key) };
-        const auto actionAndArgs = _settings.KeyMap().TryLookup(kc);
-        if (actionAndArgs)
+        if (const auto cmd{ _settings.ActionMap().GetActionByKeyChord(kc) })
         {
-            if (CommandPalette().Visibility() == Visibility::Visible && actionAndArgs.Action() != ShortcutAction::ToggleCommandPalette)
+            if (CommandPalette().Visibility() == Visibility::Visible && cmd.Action().Action() != ShortcutAction::ToggleCommandPalette)
             {
                 CommandPalette().Visibility(Visibility::Collapsed);
             }
-            _actionDispatch->DoAction(actionAndArgs);
+            _actionDispatch->DoAction(cmd.Action());
             e.Handled(true);
         }
     }
@@ -1121,23 +1120,23 @@ namespace winrt::TerminalApp::implementation
         auto const shiftDown = WI_IsFlagSet(CoreWindow::GetForCurrentThread().GetKeyState(winrt::Windows::System::VirtualKey::Shift), CoreVirtualKeyStates::Down);
 
         winrt::Microsoft::Terminal::Control::KeyChord kc{ ctrlDown, altDown, shiftDown, static_cast<int32_t>(key) };
-        const auto actionAndArgs = _settings.KeyMap().TryLookup(kc);
-        if (actionAndArgs && (actionAndArgs.Action() == ShortcutAction::CloseTab || actionAndArgs.Action() == ShortcutAction::NextTab || actionAndArgs.Action() == ShortcutAction::PrevTab || actionAndArgs.Action() == ShortcutAction::ClosePane))
+        const auto cmd{ _settings.ActionMap().GetActionByKeyChord(kc) };
+        if (cmd && (cmd.Action().Action() == ShortcutAction::CloseTab || cmd.Action().Action() == ShortcutAction::NextTab || cmd.Action().Action() == ShortcutAction::PrevTab || cmd.Action().Action() == ShortcutAction::ClosePane))
         {
-            _actionDispatch->DoAction(actionAndArgs);
+            _actionDispatch->DoAction(cmd.Action());
             e.Handled(true);
         }
     }
 
     // Method Description:
-    // - Configure the AppKeyBindings to use our ShortcutActionDispatch and the updated KeyMapping
-    // as the object to handle dispatching ShortcutAction events.
+    // - Configure the AppKeyBindings to use our ShortcutActionDispatch and the updated ActionMap
+    //    as the object to handle dispatching ShortcutAction events.
     // Arguments:
-    // - bindings: A AppKeyBindings object to wire up with our event handlers
-    void TerminalPage::_HookupKeyBindings(const KeyMapping& keymap) noexcept
+    // - bindings: An ActionMap object to wire up with our event handlers
+    void TerminalPage::_HookupKeyBindings(const ActionMap& actionMap) noexcept
     {
         _bindings->SetDispatch(*_actionDispatch);
-        _bindings->SetKeyMapping(keymap);
+        _bindings->SetActionMap(actionMap);
     }
 
     // Method Description:
@@ -2044,7 +2043,7 @@ namespace winrt::TerminalApp::implementation
             menuShortcut.Key(static_cast<Windows::System::VirtualKey>(keyChord.Vkey()));
 
             // inspect the modifiers from the KeyChord and set the flags int he XAML value
-            auto modifiers = AppKeyBindings::ConvertVKModifiers(keyChord.Modifiers());
+            auto modifiers = ActionMap::ConvertVKModifiers(keyChord.Modifiers());
 
             // add the modifiers to the shortcut
             menuShortcut.Modifiers(modifiers);
@@ -2561,7 +2560,7 @@ namespace winrt::TerminalApp::implementation
     {
         // Re-wire the keybindings to their handlers, as we'll have created a
         // new AppKeyBindings object.
-        _HookupKeyBindings(_settings.KeyMap());
+        _HookupKeyBindings(_settings.ActionMap());
 
         // Refresh UI elements
         auto profiles = _settings.ActiveProfiles();
@@ -2609,7 +2608,7 @@ namespace winrt::TerminalApp::implementation
             }
 
             auto tabImpl{ winrt::get_self<TabBase>(tab) };
-            tabImpl->SetKeyMap(_settings.KeyMap());
+            tabImpl->SetActionMap(_settings.ActionMap());
         }
 
         auto weakThis{ get_weak() };
@@ -2690,7 +2689,7 @@ namespace winrt::TerminalApp::implementation
     // - <none>
     void TerminalPage::_UpdateCommandsForPalette()
     {
-        IMap<winrt::hstring, Command> copyOfCommands = _ExpandCommands(_settings.GlobalSettings().Commands(),
+        IMap<winrt::hstring, Command> copyOfCommands = _ExpandCommands(_settings.GlobalSettings().ActionMap().NameMap(),
                                                                        _settings.ActiveProfiles().GetView(),
                                                                        _settings.GlobalSettings().ColorSchemes());
 
@@ -3098,7 +3097,7 @@ namespace winrt::TerminalApp::implementation
             _mruTabs.Append(*newTabImpl);
 
             newTabImpl->SetDispatch(*_actionDispatch);
-            newTabImpl->SetKeyMap(_settings.KeyMap());
+            newTabImpl->SetActionMap(_settings.ActionMap());
 
             // Give the tab its index in the _tabs vector so it can manage its own SwitchToTab command.
             _UpdateTabIndices();
