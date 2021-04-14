@@ -1470,6 +1470,7 @@ MSIL
 msix
 msrc
 msvcrt
+msvcrtd
 MSVS
 msys
 msysgit
@@ -2061,6 +2062,7 @@ runtests
 runtimeclass
 runuia
 runut
+runxamlformat
 rvalue
 RVERTICAL
 rxvt
@@ -2395,6 +2397,7 @@ titlebar
 TITLEISLINKNAME
 TJson
 tl
+TLambda
 TLEN
 Tlg
 Tlgdata
@@ -2852,6 +2855,7 @@ XResource
 xsd
 xsi
 xsize
+xstyler
 XSubstantial
 xtended
 xterm
